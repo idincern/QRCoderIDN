@@ -1,5 +1,7 @@
 ﻿using System;
 using System.Drawing;
+using System.Threading;
+using System.Threading.Tasks;
 using System.Windows.Forms;
 using QRCoder;
 
@@ -7,6 +9,8 @@ namespace QRCoderIDN
 {
     public partial class QRCoderIDN : Form
     {
+        private CancellationTokenSource cancellationTokenSource = new CancellationTokenSource();
+
         public QRCoderIDN()
         {
             InitializeComponent();
@@ -14,35 +18,29 @@ namespace QRCoderIDN
             pictureBoxToolTip.SetToolTip(pictureBox1, "Copy image to clipboard.");
         }
 
-        private void myQrCoder(string mytext)
+        private async Task GenerateQrCodeAsync(string mytext, CancellationToken cancellationToken)
         {
             // Calculate the desired size for the QR code based on PictureBox size
             int desiredWidth = pictureBox1.Width;
             int desiredHeight = pictureBox1.Height;
-            try
+
+            // Check if cancellation is requested at appropriate points
+            using (QRCodeGenerator qrGenerator = new QRCodeGenerator())
+            using (QRCodeData qrCodeData = qrGenerator.CreateQrCode(mytext, QRCodeGenerator.ECCLevel.Q))
+            using (QRCode qrCode = new QRCode(qrCodeData))
             {
-                using (QRCodeGenerator qrGenerator = new QRCodeGenerator())
-                using (QRCodeData qrCodeData = qrGenerator.CreateQrCode(mytext, QRCodeGenerator.ECCLevel.Q))
-                using (QRCode qrCode = new QRCode(qrCodeData))
-                {
-                    // Get the original QR code image
-                    Bitmap qrCodeImage = qrCode.GetGraphic(10);
-                    // Resize the QR code image to fit within the PictureBox
+                await Task.Run(() => 
+                {  
+                    Bitmap qrCodeImage = qrCode.GetGraphic(20);
                     Bitmap resizedImage = ResizeImage(qrCodeImage, desiredWidth, desiredHeight);
-                    // Display the resized image in the PictureBox
-                    pictureBox1.Image = resizedImage;
-                }
+                    pictureBox1.Invoke((MethodInvoker)delegate { pictureBox1.Image = resizedImage; });
+                });
             }
-            catch (Exception)
-            {
-                return;
-            }
-
         }
-
+       
         private Bitmap ResizeImage(Bitmap originalImage, int newWidth, int newHeight)
         {
-            Bitmap resizedImage = new Bitmap(newWidth, newHeight);
+            Bitmap resizedImage = new Bitmap(newWidth, newHeight, originalImage.PixelFormat);
 
             using (Graphics g = Graphics.FromImage(resizedImage))
             {
@@ -51,25 +49,36 @@ namespace QRCoderIDN
                 g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.HighQuality;
                 g.DrawImage(originalImage, 0, 0, newWidth, newHeight);
             }
+
             return resizedImage;
         }
 
-        private void textBox1_TextChanged(object sender, EventArgs e)
+        private async void textBox1_TextChanged(object sender, EventArgs e)
         {
-            myQrCoder(textBox1.Text);
+            try
+            {
+                if (textBox1.Text.Length < 12000)
+                {
+                    cancellationTokenSource.Cancel();
+                    cancellationTokenSource = new CancellationTokenSource();
+                    await GenerateQrCodeAsync(textBox1.Text, cancellationTokenSource.Token);
+                }
+                else
+                    MessageBox.Show("Enter a text with less length.");
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show("Input is invalid.");
+            }
+
         }
 
         private void pictureBox1_Click(object sender, EventArgs e)
         {
             if (pictureBox1.Image != null)
-            {
-                // Copy image to clipboard
                 Clipboard.SetImage(pictureBox1.Image);
-            }
             else
-            {
                 MessageBox.Show("No QR code to copy!");
-            }
         }
     }
 }
